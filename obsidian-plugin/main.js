@@ -1,6 +1,8 @@
 const { Plugin, Modal, Notice, PluginSettingTab, Setting, normalizePath } = require("obsidian");
+const http = require("http");
 
-const DEFAULT_SETTINGS = { outputFolder: "10-准备发布/投稿包" };
+const DEFAULT_SETTINGS = { outputFolder: "10-准备发布/投稿包", bridgePort: 27124 };
+const PAYLOAD_LIFETIME_MS = 10 * 60 * 1000;
 
 const PLATFORMS = [
   ["微信公众号", "https://mp.weixin.qq.com/"],
@@ -13,6 +15,8 @@ const PLATFORMS = [
 module.exports = class MultiPlatformPublisher extends Plugin {
   async onload() {
     await this.loadSettings();
+    this.currentPayload = null;
+    this.startBridge();
     this.addCommand({
       id: "generate-publishing-package",
       name: "为当前笔记生成多平台投稿包",
@@ -29,6 +33,10 @@ module.exports = class MultiPlatformPublisher extends Plugin {
       this.generate(file);
     });
     this.addSettingTab(new PublisherSettingTab(this.app, this));
+  }
+
+  onunload() {
+    if (this.bridgeServer) this.bridgeServer.close();
   }
 
   async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
@@ -55,8 +63,51 @@ module.exports = class MultiPlatformPublisher extends Plugin {
       ["发布清单.md", checklist(title, summary)]
     ];
     for (const [name, content] of files) await upsert(this.app.vault, `${folder}/${name}`, content);
+    this.currentPayload = {
+      title,
+      body,
+      summary,
+      sourcePath: file.path,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + PAYLOAD_LIFETIME_MS
+    };
     new Notice(`投稿包已生成：${folder}`);
     new PublishModal(this.app, title, body, folder).open();
+  }
+
+  startBridge() {
+    this.bridgeServer = http.createServer((request, response) => {
+      const origin = request.headers.origin || "";
+      const allowedOrigin = /^(chrome|edge)-extension:\/\//.test(origin) ? origin : "";
+      if (allowedOrigin) {
+        response.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+        response.setHeader("Vary", "Origin");
+      }
+      response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      response.setHeader("Cache-Control", "no-store");
+      if (request.method === "OPTIONS") { response.writeHead(204); response.end(); return; }
+
+      const address = request.socket.remoteAddress || "";
+      const isLoopback = address === "127.0.0.1" || address === "::1" || address.endsWith(":127.0.0.1");
+      if (!isLoopback || !allowedOrigin || request.url !== "/payload") {
+        response.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "forbidden" }));
+        return;
+      }
+      if (!this.currentPayload || this.currentPayload.expiresAt < Date.now()) {
+        response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "no-active-article" }));
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify(this.currentPayload));
+    });
+    this.bridgeServer.on("error", error => {
+      console.error("多平台投稿助手桥接服务启动失败", error);
+      new Notice(`浏览器桥接启动失败：端口 ${this.settings.bridgePort} 可能被占用。复制投稿仍可使用。`);
+    });
+    this.bridgeServer.listen(this.settings.bridgePort, "127.0.0.1");
   }
 };
 
@@ -69,6 +120,14 @@ class PublisherSettingTab extends PluginSettingTab {
       .addText(text => text.setValue(this.plugin.settings.outputFolder).onChange(async value => {
         this.plugin.settings.outputFolder = value.trim() || DEFAULT_SETTINGS.outputFolder;
         await this.plugin.saveSettings();
+      }));
+    new Setting(containerEl).setName("浏览器桥接端口").setDesc("Edge 扩展只通过本机回环地址读取十分钟内生成的文章。修改后需重启 Obsidian。")
+      .addText(text => text.setValue(String(this.plugin.settings.bridgePort)).onChange(async value => {
+        const port = Number.parseInt(value, 10);
+        if (Number.isInteger(port) && port >= 1024 && port <= 65535) {
+          this.plugin.settings.bridgePort = port;
+          await this.plugin.saveSettings();
+        }
       }));
   }
 }

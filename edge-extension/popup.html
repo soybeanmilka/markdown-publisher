@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>本地投稿桥</h1>
+  <p id="status">正在连接 Obsidian…</p>
+  <p id="title" class="article-title"></p>
+  <button id="fill">填充当前创作页</button>
+  <button id="open-all" class="secondary">打开全部创作页</button>
+  <details>
+    <summary>桥接设置</summary>
+    <label>端口 <input id="port" type="number" min="1024" max="65535" value="27124"></label>
+    <button id="save-port" class="secondary">保存端口</button>
+  </details>
+  <p class="hint">只填标题和正文，不会自动点击发布。图片、封面、标签和格式需要人工检查。</p>
+  <script src="popup.js"></script>
+</body>
+</html>

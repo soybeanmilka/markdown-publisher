@@ -30,3 +30,12 @@ python publisher.py "E:\Desktop\obsidian\轻量化\10-准备发布\你的文章.
 
 - 支持：YAML 属性移除、Obsidian 双链转普通文本、标题、引用、三级以内标题、无序列表、行内代码、粗体、普通链接、代码块。
 - 需要人工检查：图片嵌入、表格、复杂公式、嵌套列表及平台特有卡片。
+
+## Obsidian + Edge 自动填充版
+
+项目现在还包含：
+
+- `obsidian-plugin/`：生成投稿包，并在本机提供十分钟有效的文章桥接。
+- `edge-extension/`：读取本机桥接，在公众号、小红书、知乎、B站专栏和 CSDN 创作页尝试填入标题与正文。
+
+安装和使用步骤见 [Obsidian 插件说明](obsidian-plugin/README.md) 与 [Edge 扩展说明](edge-extension/README.md)。扩展不会读取 Cookie 或自动点击发布；图片、封面、标签和最终发布需要人工确认。
