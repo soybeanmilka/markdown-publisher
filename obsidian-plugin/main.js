@@ -38,23 +38,25 @@ module.exports = class MultiPlatformPublisher extends Plugin {
     const raw = await this.app.vault.read(file);
     const article = cleanMarkdown(raw);
     const title = titleFrom(article, file.basename);
+    const body = removeLeadingTitle(article);
     const summary = summaryFrom(article);
     const date = new Date().toISOString().slice(0, 10);
     const folder = normalizePath(`${this.settings.outputFolder}/${safeName(title)}-${date}`);
     await ensureFolder(this.app.vault, folder);
 
     const files = [
-      ["公众号.html", markdownToWechatHtml(article, title)],
-      ["知乎.md", article],
-      ["小红书.md", `${title}\n\n${article}`],
-      ["B站专栏.md", article],
-      ["CSDN.md", article],
-      ["投稿助手.html", assistantHtml(title, summary, article)],
+      ["标题.txt", title],
+      ["公众号.html", markdownToWechatHtml(body, title)],
+      ["知乎.md", body],
+      ["小红书.md", body],
+      ["B站专栏.md", body],
+      ["CSDN.md", body],
+      ["投稿助手.html", assistantHtml(title, summary, body)],
       ["发布清单.md", checklist(title, summary)]
     ];
     for (const [name, content] of files) await upsert(this.app.vault, `${folder}/${name}`, content);
     new Notice(`投稿包已生成：${folder}`);
-    new PublishModal(this.app, title, article, folder).open();
+    new PublishModal(this.app, title, body, folder).open();
   }
 };
 
@@ -77,6 +79,9 @@ class PublishModal extends Modal {
     const { contentEl } = this; contentEl.createEl("h2", { text: "投稿包已就绪" });
     contentEl.createEl("p", { text: `已保存到：${this.folder}` });
     contentEl.createEl("p", { text: "选择平台后会先复制正文，再打开对应的官方投稿页。请检查封面、图片、链接和格式后手动点击发布。" });
+    const titleButton = contentEl.createEl("button", { text: "复制标题" });
+    titleButton.style.margin = "0 8px 8px 0";
+    titleButton.onclick = async () => { await navigator.clipboard.writeText(this.title); new Notice("标题已复制。"); };
     for (const [name, url] of PLATFORMS) {
       const button = contentEl.createEl("button", { text: `复制正文并打开 ${name}` });
       button.style.margin = "0 8px 8px 0";
@@ -96,6 +101,7 @@ function cleanMarkdown(raw) {
     .replace(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (_, target, label) => label || target).trim() + "\n";
 }
 function titleFrom(text, fallback) { const match = text.match(/^#\s+(.+?)\s*$/m); return match ? match[1] : fallback; }
+function removeLeadingTitle(text) { return text.replace(/^#\s+.+?\s*\n+/, ""); }
 function summaryFrom(text) { const match = text.match(/^>\s*(.+?)\s*$/m); return match ? match[1] : "（从正文提炼一句摘要）"; }
 function safeName(value) { return value.replace(/[\\/:*?"<>|]/g, "-").slice(0, 60); }
 async function ensureFolder(vault, folder) {
