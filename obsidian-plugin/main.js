@@ -7,10 +7,9 @@ const PAYLOAD_LIFETIME_MS = 10 * 60 * 1000;
 
 const PLATFORMS = [
   ["微信公众号", "https://mp.weixin.qq.com/"],
-  ["小红书", "https://creator.xiaohongshu.com/"],
+  ["小红书", "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"],
   ["知乎", "https://zhuanlan.zhihu.com/write"],
-  ["B站专栏", "https://member.bilibili.com/platform/upload/text/apply"],
-  ["CSDN", "https://mp.csdn.net/mp_blog/creation/editor"]
+  ["B站专栏", "https://member.bilibili.com/platform/upload/text"]
 ];
 
 module.exports = class MultiPlatformPublisher extends Plugin {
@@ -69,7 +68,6 @@ module.exports = class MultiPlatformPublisher extends Plugin {
       ["知乎.md", body],
       ["小红书.md", body],
       ["B站专栏.md", body],
-      ["CSDN.md", body],
       ["投稿助手.html", assistantHtml(title, summary, body)],
       ["发布清单.md", checklist(title, summary)]
     ];
@@ -77,6 +75,7 @@ module.exports = class MultiPlatformPublisher extends Plugin {
     this.currentPayload = {
       title,
       body,
+      bodyHtml: markdownToRichHtml(body),
       summary,
       sourcePath: file.path,
       createdAt: Date.now(),
@@ -194,17 +193,56 @@ async function ensureFolder(vault, folder) {
 }
 async function upsert(vault, path, content) { const existing = vault.getAbstractFileByPath(path); if (existing) await vault.modify(existing, content); else await vault.create(path, content); }
 function escapeHtml(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-function inline(value) { return escapeHtml(value).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>"); }
+function safeUrl(value) { return /^(https?:|mailto:)/i.test(value) ? value.replace(/"/g, "&quot;") : "#"; }
+function inline(value) {
+  const code = [];
+  let html = escapeHtml(value).replace(/`([^`]+)`/g, (_, text) => {
+    const token = `\u0000CODE${code.length}\u0000`;
+    code.push(`<code>${text}</code>`);
+    return token;
+  });
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => `<a href="${safeUrl(url)}">${label}</a>`)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/~~(.+?)~~/g, "<s>$1</s>");
+  return html.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)] || "");
+}
+function tableCells(line) { return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(cell => cell.trim()); }
+function isTableSeparator(line) { return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line); }
+function markdownToRichHtml(markdown) {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const output = []; let index = 0; let list = "";
+  const closeList = () => { if (list) output.push(`</${list}>`); list = ""; };
+  while (index < lines.length) {
+    const line = lines[index];
+    const fence = line.match(/^```\s*([\w+-]*)\s*$/);
+    if (fence) {
+      closeList(); const code = []; index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index])) code.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      output.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`); continue;
+    }
+    if (index + 1 < lines.length && line.includes("|") && isTableSeparator(lines[index + 1])) {
+      closeList(); const headers = tableCells(line); const rows = []; index += 2;
+      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) rows.push(tableCells(lines[index++]));
+      output.push(`<table><thead><tr>${headers.map(cell => `<th>${inline(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`); continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) { closeList(); const level = heading[1].length; output.push(`<h${level}>${inline(heading[2])}</h${level}>`); index += 1; continue; }
+    const unordered = line.match(/^\s*[-*+]\s+(.+)$/); const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      const wanted = unordered ? "ul" : "ol"; if (list !== wanted) { closeList(); output.push(`<${wanted}>`); list = wanted; }
+      output.push(`<li>${inline((unordered || ordered)[1])}</li>`); index += 1; continue;
+    }
+    closeList();
+    if (/^>\s?/.test(line)) output.push(`<blockquote>${inline(line.replace(/^>\s?/, ""))}</blockquote>`);
+    else if (line.trim()) output.push(`<p>${inline(line.trim())}</p>`);
+    index += 1;
+  }
+  closeList(); return output.join("\n");
+}
 function markdownToWechatHtml(markdown, title) {
-  const body = markdown.split("\n").map(line => {
-    if (/^###\s+/.test(line)) return `<h3>${inline(line.slice(4))}</h3>`;
-    if (/^##\s+/.test(line)) return `<h2>${inline(line.slice(3))}</h2>`;
-    if (/^#\s+/.test(line)) return `<h1>${inline(line.slice(2))}</h1>`;
-    if (/^>\s+/.test(line)) return `<blockquote>${inline(line.slice(2))}</blockquote>`;
-    if (/^[-*]\s+/.test(line)) return `<li>${inline(line.slice(2))}</li>`;
-    return line ? `<p>${inline(line)}</p>` : "";
-  }).join("\n");
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{max-width:720px;margin:32px auto;padding:0 20px;font:16px/1.9 -apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif;color:#374151}h1{font-size:26px}h2{margin-top:32px;font-size:21px}h3{font-size:18px}blockquote{margin:16px 0;padding:10px 14px;border-left:4px solid #07c160;background:#f6ffed}code{background:#f3f4f6;padding:2px 4px;border-radius:3px}li{margin-left:20px}</style><body>${body}</body></html>`;
+  const body = markdownToRichHtml(markdown);
+  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{max-width:720px;margin:32px auto;padding:0 20px;font:16px/1.9 -apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif;color:#374151}h1{font-size:26px}h2{margin-top:32px;font-size:21px}h3{font-size:18px}blockquote{margin:16px 0;padding:10px 14px;border-left:4px solid #07c160;background:#f6ffed}code{background:#f3f4f6;padding:2px 4px;border-radius:3px}pre{padding:14px;overflow:auto;background:#1f2937;color:#f9fafb;border-radius:6px}pre code{background:transparent}li{margin-left:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}</style><body>${body}</body></html>`;
 }
 function assistantHtml(title, summary, article) { return `<!doctype html><meta charset="utf-8"><title>投稿助手</title><h1>${escapeHtml(title)}</h1><p>${escapeHtml(summary)}</p><p>打开一个平台，粘贴已复制的正文，检查后手动发布。</p><textarea id="article" style="width:95%;height:55vh">${escapeHtml(article)}</textarea><p>${PLATFORMS.map(([name, url]) => `<button onclick="navigator.clipboard.writeText(document.getElementById('article').value);window.open('${url}','_blank')">复制并打开${name}</button>`).join(" ")}</p>`; }
 function checklist(title, summary) { return `# 发布清单：${title}\n\n## 摘要\n\n${summary}\n\n## 最后检查\n\n- [ ] 平台标题长度和敏感词\n- [ ] 封面、图片、代码块、公式\n- [ ] 外链、引用和原创声明\n- [ ] 内容已核对，确认后再点击发布\n\n> 本插件不登录账号、不保存密钥，也不会自动点击发布。\n`; }

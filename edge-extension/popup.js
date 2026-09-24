@@ -2,8 +2,7 @@ const PAGES = [
   "https://mp.weixin.qq.com/",
   "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
   "https://zhuanlan.zhihu.com/write",
-  "https://member.bilibili.com/platform/upload/text/apply",
-  "https://mp.csdn.net/mp_blog/creation/editor"
+  "https://member.bilibili.com/platform/upload/text"
 ];
 
 async function refresh() {

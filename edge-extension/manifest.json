@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "本地多平台投稿桥",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "从本机 Obsidian 投稿助手读取文章，并在官方创作页填入标题和正文。",
   "permissions": ["tabs", "storage"],
   "host_permissions": [
@@ -9,8 +9,7 @@
     "https://mp.weixin.qq.com/*",
     "https://creator.xiaohongshu.com/*",
     "https://zhuanlan.zhihu.com/*",
-    "https://member.bilibili.com/*",
-    "https://mp.csdn.net/*"
+    "https://member.bilibili.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": {
@@ -23,10 +22,9 @@
         "https://mp.weixin.qq.com/*",
         "https://creator.xiaohongshu.com/*",
         "https://zhuanlan.zhihu.com/*",
-        "https://member.bilibili.com/*",
-        "https://mp.csdn.net/*"
+        "https://member.bilibili.com/*"
       ],
-      "js": ["content.js"],
+      "js": ["platform-adapters.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

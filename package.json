@@ -1,8 +1,8 @@
 {
   "name": "local-multi-platform-publisher",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
-    "test": "node tests/bridge-smoke-test.js"
+    "test": "node tests/platform-adapters.test.js && node tests/bridge-smoke-test.js"
   }
 }

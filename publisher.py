@@ -114,7 +114,7 @@ def write_outputs(source: Path, output_root: Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
 
     (destination / "公众号.html").write_text(markdown_to_wechat_html(article, title), encoding="utf-8")
-    for platform in ("知乎", "掘金", "CSDN", "小红书长文"):
+    for platform in ("知乎", "小红书长文", "B站专栏"):
         (destination / f"{platform}.md").write_text(article, encoding="utf-8")
 
     checklist = f"""# 发布清单：{title}
@@ -130,7 +130,7 @@ def write_outputs(source: Path, output_root: Path) -> Path:
 ## 发布顺序
 
 1. 公众号：打开 `公众号.html`，在浏览器中全选正文并复制，再粘贴到公众号编辑器。
-2. 知乎、掘金、CSDN：打开同名 `.md`，复制正文到对应编辑器。
+2. 知乎、小红书、B站：打开同名 `.md`，复制正文到对应编辑器。
 3. 发布前检查标题、封面、代码块和所有链接；不同平台的格式会略有差异。
 
 > 本工具只生成可发布稿件，不登录账号、不上传内容、不绕过任何平台或插件的权限限制。
