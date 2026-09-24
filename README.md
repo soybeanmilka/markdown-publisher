@@ -36,6 +36,8 @@ python publisher.py "E:\Desktop\obsidian\轻量化\10-准备发布\你的文章.
 项目现在还包含：
 
 - `obsidian-plugin/`：生成投稿包，并在本机提供十分钟有效的文章桥接。
-- `edge-extension/`：读取本机桥接，在公众号、小红书、知乎、B站专栏和 CSDN 创作页尝试填入标题与正文。
+- `edge-extension/`：读取本机桥接，在公众号、小红书、知乎、B站专栏和 CSDN 创作页自动等待并填入标题与正文。
+
+默认工作流已经压缩为一次点击：在 Obsidian 打开文章后点击左侧发送图标，其余创作页会自动打开并等待填写。
 
 安装和使用步骤见 [Obsidian 插件说明](obsidian-plugin/README.md) 与 [Edge 扩展说明](edge-extension/README.md)。扩展不会读取 Cookie 或自动点击发布；图片、封面、标签和最终发布需要人工确认。

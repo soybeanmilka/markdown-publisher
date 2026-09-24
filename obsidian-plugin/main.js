@@ -1,5 +1,6 @@
 const { Plugin, Modal, Notice, PluginSettingTab, Setting, normalizePath } = require("obsidian");
 const http = require("http");
+const { shell } = require("electron");
 
 const DEFAULT_SETTINGS = { outputFolder: "10-准备发布/投稿包", bridgePort: 27124 };
 const PAYLOAD_LIFETIME_MS = 10 * 60 * 1000;
@@ -27,10 +28,20 @@ module.exports = class MultiPlatformPublisher extends Plugin {
         return true;
       }
     });
-    this.addRibbonIcon("send", "生成多平台投稿包", () => {
+    this.addCommand({
+      id: "generate-and-open-all-platforms",
+      name: "生成并自动填充全部平台",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) this.generate(file, true);
+        return true;
+      }
+    });
+    this.addRibbonIcon("send", "生成并自动填充全部平台", () => {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return new Notice("请先打开一篇要投稿的 Markdown 笔记。");
-      this.generate(file);
+      this.generate(file, true);
     });
     this.addSettingTab(new PublisherSettingTab(this.app, this));
   }
@@ -42,7 +53,7 @@ module.exports = class MultiPlatformPublisher extends Plugin {
   async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
   async saveSettings() { await this.saveData(this.settings); }
 
-  async generate(file) {
+  async generate(file, openAll = false) {
     const raw = await this.app.vault.read(file);
     const article = cleanMarkdown(raw);
     const title = titleFrom(article, file.basename);
@@ -71,8 +82,13 @@ module.exports = class MultiPlatformPublisher extends Plugin {
       createdAt: Date.now(),
       expiresAt: Date.now() + PAYLOAD_LIFETIME_MS
     };
-    new Notice(`投稿包已生成：${folder}`);
-    new PublishModal(this.app, title, body, folder).open();
+    if (openAll) {
+      await Promise.allSettled(PLATFORMS.map(([, url]) => shell.openExternal(url)));
+      new Notice("投稿包已生成，创作页正在打开；扩展会自动等待并填入内容。");
+    } else {
+      new Notice(`投稿包已生成：${folder}`);
+      new PublishModal(this.app, title, body, folder).open();
+    }
   }
 
   startBridge() {
@@ -141,6 +157,12 @@ class PublishModal extends Modal {
     const { contentEl } = this; contentEl.createEl("h2", { text: "投稿包已就绪" });
     contentEl.createEl("p", { text: `已保存到：${this.folder}` });
     contentEl.createEl("p", { text: "选择平台后会先复制正文，再打开对应的官方投稿页。请检查封面、图片、链接和格式后手动点击发布。" });
+    const allButton = contentEl.createEl("button", { text: "打开全部平台并自动填充" });
+    allButton.style.margin = "0 8px 8px 0";
+    allButton.onclick = async () => {
+      await Promise.allSettled(PLATFORMS.map(([, url]) => shell.openExternal(url)));
+      this.close();
+    };
     const titleButton = contentEl.createEl("button", { text: "复制标题" });
     titleButton.style.margin = "0 8px 8px 0";
     titleButton.onclick = async () => { await navigator.clipboard.writeText(this.title); new Notice("标题已复制。"); };

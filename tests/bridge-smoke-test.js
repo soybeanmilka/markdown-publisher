@@ -15,6 +15,7 @@ Module._load = function (request, parent, isMain) {
       normalizePath: value => value
     };
   }
+  if (request === "electron") return { shell: { openExternal: async () => {} } };
   return originalLoad.call(this, request, parent, isMain);
 };
 

@@ -83,6 +83,41 @@ function showResult(message, isError = false) {
   setTimeout(() => toast.remove(), 6000);
 }
 
+let fillTimer = null;
+
+function tryFill(payload) {
+  const adapter = ADAPTERS[location.hostname];
+  if (!adapter) return false;
+  const key = `local-publisher-${payload.createdAt}-${location.pathname}`;
+  if (sessionStorage.getItem(key)) return true;
+  const titleElement = findFirst(adapter.title);
+  const bodyElement = findFirst(adapter.body);
+  if (!titleElement || !bodyElement) return false;
+  setFormValue(titleElement, payload.title);
+  setFormValue(bodyElement, payload.body);
+  sessionStorage.setItem(key, "filled");
+  showResult("标题和正文已自动填入，请检查格式、图片和封面后再发布。");
+  return true;
+}
+
+function waitForEditor(payload, manual) {
+  if (fillTimer) clearInterval(fillTimer);
+  if (tryFill(payload)) return;
+  if (manual) showResult("已连接 Obsidian，正在等待创作编辑器出现…");
+
+  const deadline = Math.min(payload.expiresAt || Date.now() + 600000, Date.now() + 600000);
+  fillTimer = setInterval(() => {
+    if (tryFill(payload)) {
+      clearInterval(fillTimer);
+      fillTimer = null;
+    } else if (Date.now() >= deadline) {
+      clearInterval(fillTimer);
+      fillTimer = null;
+      if (manual) showResult("等待编辑器超时，请重新生成投稿包后再试。", true);
+    }
+  }, 800);
+}
+
 async function fillFromObsidian(manual = false) {
   const adapter = ADAPTERS[location.hostname];
   if (!adapter) return;
@@ -92,23 +127,7 @@ async function fillFromObsidian(manual = false) {
     return;
   }
 
-  const key = `local-publisher-${result.payload.createdAt}-${location.pathname}`;
-  if (sessionStorage.getItem(key)) return;
-  const started = Date.now();
-  const timer = setInterval(() => {
-    const titleElement = findFirst(adapter.title);
-    const bodyElement = findFirst(adapter.body);
-    if (titleElement && bodyElement) {
-      clearInterval(timer);
-      setFormValue(titleElement, result.payload.title);
-      setFormValue(bodyElement, result.payload.body);
-      sessionStorage.setItem(key, "filled");
-      showResult("标题和正文已填入，请检查格式、图片和封面后再发布。");
-    } else if (Date.now() - started > 20000) {
-      clearInterval(timer);
-      showResult("没找到编辑器。请确认已进入文章创作页，或点击扩展按钮重试。", true);
-    }
-  }, 800);
+  waitForEditor(result.payload, manual);
 }
 
 chrome.runtime.onMessage.addListener(message => {

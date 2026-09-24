@@ -23,7 +23,7 @@ document.getElementById("fill").onclick = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
   try { await chrome.tabs.sendMessage(tab.id, { type: "FILL_CURRENT_PAGE" }); window.close(); }
-  catch (_) { document.getElementById("status").textContent = "当前页面不是已支持的创作页"; }
+  catch (_) { document.getElementById("status").textContent = "当前页不是创作页，请使用上方的一键按钮"; }
 };
 
 document.getElementById("open-all").onclick = async () => {
