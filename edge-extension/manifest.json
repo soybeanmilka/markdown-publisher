@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "本地多平台投稿桥",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "从本机 Obsidian 投稿助手读取文章，并在官方创作页填入标题和正文。",
   "permissions": ["tabs", "storage"],
   "host_permissions": [

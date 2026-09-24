@@ -29,4 +29,21 @@ assert.doesNotThrow(
   "content.js 在旧 manifest 只加载单文件时也必须能启动"
 );
 
+const ownerDocument = {
+  body: null,
+  defaultView: {
+    frameElement: null,
+    getComputedStyle: () => ({ display: "block", visibility: "visible" })
+  }
+};
+const visibleElement = {
+  ownerDocument,
+  getClientRects: () => [{ width: 100, height: 20 }]
+};
+assert.strictEqual(
+  context.isVisible(visibleElement),
+  true,
+  "扫描普通可见元素时不应因 ownerDocument 变量缺失而崩溃"
+);
+
 console.log("content bootstrap test passed");

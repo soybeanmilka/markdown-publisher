@@ -36,7 +36,8 @@ const { PLATFORM_CONFIG, payloadContentFor } = platformApi;
 
 function isVisible(element) {
   if (!element) return false;
-  const ownerWindow = element.ownerDocument?.defaultView || window;
+  const ownerDocument = element.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
   const style = ownerWindow.getComputedStyle(element);
   const hasRect = element.getClientRects().length > 0;
   const frameVisible = ownerDocument.defaultView?.frameElement && isVisible(ownerDocument.defaultView.frameElement);
