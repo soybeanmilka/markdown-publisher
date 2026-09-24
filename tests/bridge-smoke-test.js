@@ -21,9 +21,12 @@ Module._load = function (request, parent, isMain) {
 const PublisherPlugin = require("../obsidian-plugin/main.js");
 Module._load = originalLoad;
 
-function request(port, origin) {
+function request(port, origin, bridgeRequest = false) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ hostname: "127.0.0.1", port, path: "/payload", headers: origin ? { Origin: origin } : {} }, response => {
+    const headers = {};
+    if (origin) headers.Origin = origin;
+    if (bridgeRequest) headers["X-Local-Publisher-Bridge"] = "edge-extension-v1";
+    const req = http.request({ hostname: "127.0.0.1", port, path: "/payload", headers }, response => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", chunk => { body += chunk; });
@@ -41,20 +44,30 @@ async function main() {
   plugin.startBridge();
   await new Promise(resolve => plugin.bridgeServer.once("listening", resolve));
   const port = plugin.bridgeServer.address().port;
+  try {
+    const unauthenticated = await request(port);
+    assert.strictEqual(unauthenticated.status, 403);
 
-  const forbidden = await request(port);
-  assert.strictEqual(forbidden.status, 403);
+    const withoutOrigin = await request(port, undefined, true);
+    assert.strictEqual(withoutOrigin.status, 200);
 
-  const allowed = await request(port, "chrome-extension://test-extension");
-  assert.strictEqual(allowed.status, 200);
-  assert.strictEqual(JSON.parse(allowed.body).title, "测试标题");
-  assert.strictEqual(allowed.headers["access-control-allow-origin"], "chrome-extension://test-extension");
+    const opaqueOrigin = await request(port, "null", true);
+    assert.strictEqual(opaqueOrigin.status, 200);
 
-  plugin.currentPayload.expiresAt = Date.now() - 1;
-  const expired = await request(port, "chrome-extension://test-extension");
-  assert.strictEqual(expired.status, 404);
+    const forbidden = await request(port, "https://example.com", true);
+    assert.strictEqual(forbidden.status, 403);
 
-  await new Promise(resolve => plugin.bridgeServer.close(resolve));
+    const allowed = await request(port, "chrome-extension://test-extension", true);
+    assert.strictEqual(allowed.status, 200);
+    assert.strictEqual(JSON.parse(allowed.body).title, "测试标题");
+    assert.strictEqual(allowed.headers["access-control-allow-origin"], "chrome-extension://test-extension");
+
+    plugin.currentPayload.expiresAt = Date.now() - 1;
+    const expired = await request(port, "chrome-extension://test-extension", true);
+    assert.strictEqual(expired.status, 404);
+  } finally {
+    await new Promise(resolve => plugin.bridgeServer.close(resolve));
+  }
   console.log("bridge smoke test passed");
 }
 

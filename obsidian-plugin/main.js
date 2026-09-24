@@ -78,19 +78,22 @@ module.exports = class MultiPlatformPublisher extends Plugin {
   startBridge() {
     this.bridgeServer = http.createServer((request, response) => {
       const origin = request.headers.origin || "";
-      const allowedOrigin = /^(chrome|edge)-extension:\/\//.test(origin) ? origin : "";
+      const isExtensionOrigin = /^(chrome|edge)-extension:\/\//.test(origin);
+      const allowedOrigin = isExtensionOrigin ? origin : "";
+      const hasBridgeHeader = request.headers["x-local-publisher-bridge"] === "edge-extension-v1";
       if (allowedOrigin) {
         response.setHeader("Access-Control-Allow-Origin", allowedOrigin);
         response.setHeader("Vary", "Origin");
       }
       response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-      response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      response.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Local-Publisher-Bridge");
       response.setHeader("Cache-Control", "no-store");
       if (request.method === "OPTIONS") { response.writeHead(204); response.end(); return; }
 
       const address = request.socket.remoteAddress || "";
       const isLoopback = address === "127.0.0.1" || address === "::1" || address.endsWith(":127.0.0.1");
-      if (!isLoopback || !allowedOrigin || request.url !== "/payload") {
+      const hasAllowedOrigin = !origin || origin === "null" || isExtensionOrigin;
+      if (!isLoopback || !hasBridgeHeader || !hasAllowedOrigin || request.url !== "/payload") {
         response.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ error: "forbidden" }));
         return;

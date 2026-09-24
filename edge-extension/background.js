@@ -7,7 +7,10 @@ async function getBridgePort() {
 
 async function getPayload() {
   const port = await getBridgePort();
-  const response = await fetch(`http://127.0.0.1:${port}/payload`, { cache: "no-store" });
+  const response = await fetch(`http://127.0.0.1:${port}/payload`, {
+    cache: "no-store",
+    headers: { "X-Local-Publisher-Bridge": "edge-extension-v1" }
+  });
   if (!response.ok) throw new Error(response.status === 404 ? "请先在 Obsidian 生成投稿包" : `桥接请求失败：${response.status}`);
   return response.json();
 }
