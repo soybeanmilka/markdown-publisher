@@ -1,8 +1,8 @@
 const FALLBACK_PLATFORM_CONFIG = {
   "mp.weixin.qq.com": {
     name: "微信公众号", contentKind: "html",
-    title: ["#title", "textarea[placeholder*='标题']", "input[placeholder*='标题']"],
-    body: [".ProseMirror", ".edui-body-container", "body[contenteditable='true']", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
+    title: ["#title", "textarea[placeholder*='标题']", "input[placeholder*='标题']", "[contenteditable='true'][data-placeholder*='标题']", "[contenteditable='true'][aria-label*='标题']", ".appmsg_title [contenteditable='true']", "[class*='title'] [contenteditable='true']"],
+    body: [".ProseMirror", ".edui-body-container", ".js_editor_area [contenteditable='true']", "body[contenteditable='true']", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
     entryActions: [{ text: "文章" }]
   },
   "creator.xiaohongshu.com": {
@@ -15,6 +15,12 @@ const FALLBACK_PLATFORM_CONFIG = {
     name: "知乎", contentKind: "html",
     title: ["textarea[placeholder*='标题']", ".WriteIndex-titleInput textarea", "input[placeholder*='标题']"],
     body: [".public-DraftEditor-content", ".ProseMirror", "[contenteditable='true']"],
+    entryActions: []
+  },
+  "mp.toutiao.com": {
+    name: "今日头条", contentKind: "html",
+    title: ["textarea[placeholder*='标题']", "input[placeholder*='标题']", "[contenteditable='true'][data-placeholder*='标题']"],
+    body: [".ProseMirror", ".ql-editor", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
     entryActions: []
   },
   "member.bilibili.com": {
@@ -46,19 +52,23 @@ function isVisible(element) {
 
 function documentsToSearch() {
   const documents = [document];
-  for (const frame of document.querySelectorAll("iframe")) {
-    try {
-      if (frame.contentDocument) documents.push(frame.contentDocument);
-    } catch (_) { /* 跨域 iframe 无法操作，保留手动粘贴兜底。 */ }
+  for (let index = 0; index < documents.length; index += 1) {
+    const ownerDocument = documents[index];
+    for (const frame of ownerDocument.querySelectorAll("iframe")) {
+      try {
+        if (frame.contentDocument && !documents.includes(frame.contentDocument)) documents.push(frame.contentDocument);
+      } catch (_) { /* 跨域 iframe 无法操作，保留手动粘贴兜底。 */ }
+    }
   }
   return documents;
 }
 
-function findFirst(selectors, allowHidden = false) {
+function findFirst(selectors, allowHidden = false, excludedElement = null) {
   for (const ownerDocument of documentsToSearch()) {
     for (const selector of selectors) {
       const elements = [...ownerDocument.querySelectorAll(selector)];
-      const element = elements.find(isVisible) || (allowHidden ? elements[0] : null);
+      const candidates = elements.filter(element => element !== excludedElement);
+      const element = candidates.find(isVisible) || (allowHidden ? candidates[0] : null);
       if (element) return element;
     }
   }
@@ -189,7 +199,7 @@ function tryFill(payload) {
 
   const titleElement = findFirst(adapter.title);
   const bodyContent = payloadContentFor(adapter, payload);
-  const bodyElement = findFirst(adapter.body, bodyContent.kind === "markdown");
+  const bodyElement = findFirst(adapter.body, bodyContent.kind === "markdown", titleElement);
   if (!titleElement || !bodyElement) {
     tryEnterEditor(adapter, payload);
     return false;

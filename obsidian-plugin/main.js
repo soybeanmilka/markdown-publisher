@@ -1,19 +1,34 @@
-const { Plugin, Modal, Notice, PluginSettingTab, Setting, normalizePath } = require("obsidian");
+const { Plugin, Modal, Notice, PluginSettingTab, Setting, normalizePath, MarkdownRenderer, requestUrl } = require("obsidian");
 const http = require("http");
 const { shell } = require("electron");
+let WechatDraftClient;
+let publishWechatDraft;
 
-const DEFAULT_SETTINGS = { outputFolder: "10-准备发布/投稿包", bridgePort: 27124 };
+const DEFAULT_SETTINGS = {
+  outputFolder: "10-准备发布/投稿包",
+  bridgePort: 27124,
+  wechatAppId: "",
+  wechatAppSecret: "",
+  wechatAuthor: "",
+  wechatSourceUrl: ""
+};
 const PAYLOAD_LIFETIME_MS = 10 * 60 * 1000;
 
 const PLATFORMS = [
   ["微信公众号", "https://mp.weixin.qq.com/"],
   ["小红书", "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"],
   ["知乎", "https://zhuanlan.zhihu.com/write"],
+  ["今日头条", "https://mp.toutiao.com/profile_v4/graphic/publish"],
   ["B站专栏", "https://member.bilibili.com/platform/upload/text"]
 ];
 
 module.exports = class MultiPlatformPublisher extends Plugin {
   async onload() {
+    // Obsidian's plugin loader does not resolve a module-scope relative require
+    // from the plugin directory. Resolve the optional helper after the plugin
+    // instance gives us its real installation directory.
+    const helperPath = this.app.vault.adapter.getFullPath(normalizePath(`${this.manifest.dir}/wechat-draft.js`));
+    ({ WechatDraftClient, publishWechatDraft } = require(helperPath));
     await this.loadSettings();
     this.currentPayload = null;
     this.startBridge();
@@ -37,6 +52,16 @@ module.exports = class MultiPlatformPublisher extends Plugin {
         return true;
       }
     });
+    this.addCommand({
+      id: "sync-current-note-to-wechat-draft",
+      name: "同步当前笔记到微信公众号草稿箱",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) this.syncWechatDraft(file);
+        return true;
+      }
+    });
     this.addRibbonIcon("send", "生成并自动填充全部平台", () => {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return new Notice("请先打开一篇要投稿的 Markdown 笔记。");
@@ -52,19 +77,25 @@ module.exports = class MultiPlatformPublisher extends Plugin {
   async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
   async saveSettings() { await this.saveData(this.settings); }
 
-  async generate(file, openAll = false) {
+  async prepareArticle(file) {
     const raw = await this.app.vault.read(file);
-    const article = cleanMarkdown(raw);
+    const article = cleanMarkdown(await resolveObsidianImages(this.app, raw, file));
     const title = titleFrom(article, file.basename);
     const body = removeLeadingTitle(article);
     const summary = summaryFrom(article);
+    const bodyHtml = await renderPortableHtml(this.app, body, file, this);
+    return { article, title, body, bodyHtml, summary };
+  }
+
+  async generate(file, openAll = false) {
+    const { title, body, bodyHtml, summary } = await this.prepareArticle(file);
     const date = new Date().toISOString().slice(0, 10);
     const folder = normalizePath(`${this.settings.outputFolder}/${safeName(title)}-${date}`);
     await ensureFolder(this.app.vault, folder);
 
     const files = [
       ["标题.txt", title],
-      ["公众号.html", markdownToWechatHtml(body, title)],
+      ["公众号.html", wrapWechatHtml(bodyHtml, title)],
       ["知乎.md", body],
       ["小红书.md", body],
       ["B站专栏.md", body],
@@ -75,7 +106,7 @@ module.exports = class MultiPlatformPublisher extends Plugin {
     this.currentPayload = {
       title,
       body,
-      bodyHtml: markdownToRichHtml(body),
+      bodyHtml,
       summary,
       sourcePath: file.path,
       createdAt: Date.now(),
@@ -87,6 +118,33 @@ module.exports = class MultiPlatformPublisher extends Plugin {
     } else {
       new Notice(`投稿包已生成：${folder}`);
       new PublishModal(this.app, title, body, folder).open();
+    }
+  }
+
+  async syncWechatDraft(file) {
+    if (!this.settings.wechatAppId || !this.settings.wechatAppSecret) {
+      new Notice("请先在插件设置中填写微信公众号 AppID 和 AppSecret。");
+      return;
+    }
+    try {
+      new Notice("正在渲染文章并上传图片到微信公众号…");
+      const article = await this.prepareArticle(file);
+      const client = new WechatDraftClient({
+        appId: this.settings.wechatAppId,
+        appSecret: this.settings.wechatAppSecret,
+        request: requestUrl
+      });
+      const result = await publishWechatDraft(client, {
+        title: article.title,
+        author: this.settings.wechatAuthor,
+        digest: plainText(article.summary),
+        html: article.bodyHtml,
+        sourceUrl: this.settings.wechatSourceUrl
+      });
+      new Notice(`已写入微信公众号草稿箱：${result.uploadedImages} 张正文图片。请到后台检查后发布。`, 10000);
+    } catch (error) {
+      console.error("微信公众号草稿同步失败", error);
+      new Notice(`微信公众号草稿同步失败：${error?.message || error}`, 12000);
     }
   }
 
@@ -147,6 +205,24 @@ class PublisherSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }
       }));
+    containerEl.createEl("h3", { text: "微信公众号官方草稿 API" });
+    containerEl.createEl("p", { text: "只在执行“同步当前笔记到微信公众号草稿箱”时请求微信官方 API。公众号账号必须拥有相应接口权限，并把当前出口 IP 加入白名单。" });
+    new Setting(containerEl).setName("AppID").addText(text => text
+      .setValue(this.plugin.settings.wechatAppId)
+      .onChange(async value => { this.plugin.settings.wechatAppId = value.trim(); await this.plugin.saveSettings(); }));
+    new Setting(containerEl).setName("AppSecret").setDesc("保存在本库插件 data.json 中，不会发送给其它平台。")
+      .addText(text => {
+        text.inputEl.type = "password";
+        text.setValue(this.plugin.settings.wechatAppSecret).onChange(async value => {
+          this.plugin.settings.wechatAppSecret = value.trim(); await this.plugin.saveSettings();
+        });
+      });
+    new Setting(containerEl).setName("作者名").addText(text => text
+      .setValue(this.plugin.settings.wechatAuthor)
+      .onChange(async value => { this.plugin.settings.wechatAuthor = value.trim(); await this.plugin.saveSettings(); }));
+    new Setting(containerEl).setName("原文链接（可选）").addText(text => text
+      .setValue(this.plugin.settings.wechatSourceUrl)
+      .onChange(async value => { this.plugin.settings.wechatSourceUrl = value.trim(); await this.plugin.saveSettings(); }));
   }
 }
 
@@ -181,7 +257,27 @@ class PublishModal extends Modal {
 
 function cleanMarkdown(raw) {
   return raw.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "")
+    .replace(/!\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (_, target, label) => `![${label || target}](${encodeURI(target)})`)
     .replace(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (_, target, label) => label || target).trim() + "\n";
+}
+async function resolveObsidianImages(app, markdown, sourceFile) {
+  const pattern = /!\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
+  const matches = [...markdown.matchAll(pattern)];
+  let resolved = markdown;
+  for (const match of matches) {
+    const target = match[1].trim();
+    const asset = app.metadataCache?.getFirstLinkpathDest(target, sourceFile.path);
+    const extension = String(asset?.extension || target.split(".").pop() || "").toLowerCase();
+    const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" }[extension];
+    if (!asset || !mime) continue;
+    try {
+      const binary = await app.vault.readBinary(asset);
+      const dataUrl = `data:${mime};base64,${Buffer.from(binary).toString("base64")}`;
+      const alt = (match[2] || target).replace(/\]/g, "");
+      resolved = resolved.replace(match[0], `![${alt}](${dataUrl})`);
+    } catch (_) { /* 找不到图片时保留标准 Markdown 路径，方便用户发现并手动处理。 */ }
+  }
+  return resolved;
 }
 function titleFrom(text, fallback) { const match = text.match(/^#\s+(.+?)\s*$/m); return match ? match[1] : fallback; }
 function removeLeadingTitle(text) { return text.replace(/^#\s+.+?\s*\n+/, ""); }
@@ -194,6 +290,7 @@ async function ensureFolder(vault, folder) {
 async function upsert(vault, path, content) { const existing = vault.getAbstractFileByPath(path); if (existing) await vault.modify(existing, content); else await vault.create(path, content); }
 function escapeHtml(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function safeUrl(value) { return /^(https?:|mailto:)/i.test(value) ? value.replace(/"/g, "&quot;") : "#"; }
+function safeImageUrl(value) { return /^(https?:|data:image\/(?:png|jpeg|gif|webp|svg\+xml);base64,)/i.test(value) ? value.replace(/"/g, "&quot;") : "#"; }
 function inline(value) {
   const code = [];
   let html = escapeHtml(value).replace(/`([^`]+)`/g, (_, text) => {
@@ -201,7 +298,8 @@ function inline(value) {
     code.push(`<code>${text}</code>`);
     return token;
   });
-  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => `<a href="${safeUrl(url)}">${label}</a>`)
+  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, url) => `<img src="${safeImageUrl(url)}" alt="${alt}">`)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => `<a href="${safeUrl(url)}">${label}</a>`)
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/~~(.+?)~~/g, "<s>$1</s>");
   return html.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)] || "");
@@ -240,9 +338,94 @@ function markdownToRichHtml(markdown) {
   }
   closeList(); return output.join("\n");
 }
+function plainText(value) {
+  return String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function rasterizeSvg(svg) {
+  const ownerDocument = svg.ownerDocument;
+  const ownerWindow = ownerDocument.defaultView;
+  const rect = svg.getBoundingClientRect();
+  const viewBox = svg.viewBox?.baseVal;
+  const width = Math.max(1, Math.ceil(rect.width || viewBox?.width || Number(svg.getAttribute("width")) || 800));
+  const height = Math.max(1, Math.ceil(rect.height || viewBox?.height || Number(svg.getAttribute("height")) || 300));
+  const xml = new ownerWindow.XMLSerializer().serializeToString(svg);
+  const source = `data:image/svg+xml;base64,${Buffer.from(xml, "utf8").toString("base64")}`;
+  const image = new ownerWindow.Image();
+  await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = source; });
+  const scale = Math.min(2, 2400 / width, 2400 / height);
+  const canvas = ownerDocument.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const replacement = ownerDocument.createElement("img");
+  replacement.src = canvas.toDataURL("image/png");
+  replacement.alt = svg.closest(".mermaid") ? "Mermaid 图表" : "数学公式";
+  const blockMath = svg.closest("mjx-container")?.getAttribute("display") === "true";
+  replacement.setAttribute("style", blockMath
+    ? "display:block;max-width:100%;height:auto;margin:16px auto;"
+    : "display:inline-block;max-width:100%;height:auto;vertical-align:middle;margin:0 2px;");
+  const mermaid = svg.closest(".mermaid");
+  const mathHost = svg.closest("mjx-container");
+  if (mermaid) mermaid.replaceWith(replacement);
+  else if (mathHost) mathHost.replaceWith(replacement);
+  else svg.replaceWith(replacement);
+}
+function applyPortableStyles(container) {
+  const styles = {
+    h1: "font-size:26px;line-height:1.4;font-weight:700;margin:28px 0 16px;color:#111827;",
+    h2: "font-size:22px;line-height:1.5;font-weight:700;margin:28px 0 14px;color:#111827;border-bottom:1px solid #e5e7eb;padding-bottom:6px;",
+    h3: "font-size:18px;line-height:1.6;font-weight:700;margin:22px 0 10px;color:#1f2937;",
+    p: "font-size:16px;line-height:1.9;margin:12px 0;color:#374151;",
+    blockquote: "margin:16px 0;padding:10px 14px;border-left:4px solid #07c160;background:#f6ffed;color:#4b5563;",
+    pre: "margin:16px 0;padding:14px;overflow:auto;background:#1f2937;color:#f9fafb;border-radius:6px;line-height:1.6;white-space:pre-wrap;",
+    code: "font-family:Consolas,monospace;background:#f3f4f6;padding:2px 4px;border-radius:3px;",
+    img: "display:block;max-width:100%;height:auto;margin:16px auto;",
+    table: "border-collapse:collapse;width:100%;margin:16px 0;",
+    th: "border:1px solid #d1d5db;padding:8px;text-align:left;background:#f9fafb;",
+    td: "border:1px solid #d1d5db;padding:8px;text-align:left;",
+    li: "font-size:16px;line-height:1.8;margin:4px 0;color:#374151;"
+  };
+  for (const [selector, style] of Object.entries(styles)) {
+    for (const element of container.querySelectorAll(selector)) {
+      const existing = element.getAttribute("style") || "";
+      element.setAttribute("style", `${style}${existing}`);
+    }
+  }
+  for (const code of container.querySelectorAll("pre code")) code.setAttribute("style", "background:transparent;padding:0;color:inherit;");
+}
+async function renderPortableHtml(app, markdown, sourceFile, component) {
+  if (!MarkdownRenderer || typeof document === "undefined" || !document.body) return markdownToRichHtml(markdown);
+  const container = document.createElement("div");
+  Object.assign(container.style, { position: "fixed", left: "-10000px", top: "0", width: "760px", visibility: "hidden" });
+  document.body.appendChild(container);
+  try {
+    await MarkdownRenderer.render(app, markdown, container, sourceFile.path, component);
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      const pending = [...container.querySelectorAll(".mermaid")].some(element => !element.querySelector("svg"));
+      if (!pending) break;
+      await delay(100);
+    }
+    for (const svg of [...container.querySelectorAll("svg")]) {
+      try { await rasterizeSvg(svg); } catch (error) { console.warn("SVG 转 PNG 失败，将保留原始 SVG", error); }
+    }
+    applyPortableStyles(container);
+    return container.innerHTML || markdownToRichHtml(markdown);
+  } finally {
+    container.remove();
+  }
+}
+function wrapWechatHtml(body, title) {
+  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${escapeHtml(title)}</title><body style="max-width:720px;margin:32px auto;padding:0 20px;font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;color:#374151;">${body}</body></html>`;
+}
 function markdownToWechatHtml(markdown, title) {
   const body = markdownToRichHtml(markdown);
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{max-width:720px;margin:32px auto;padding:0 20px;font:16px/1.9 -apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif;color:#374151}h1{font-size:26px}h2{margin-top:32px;font-size:21px}h3{font-size:18px}blockquote{margin:16px 0;padding:10px 14px;border-left:4px solid #07c160;background:#f6ffed}code{background:#f3f4f6;padding:2px 4px;border-radius:3px}pre{padding:14px;overflow:auto;background:#1f2937;color:#f9fafb;border-radius:6px}pre code{background:transparent}li{margin-left:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}</style><body>${body}</body></html>`;
+  return wrapWechatHtml(body, title);
 }
 function assistantHtml(title, summary, article) { return `<!doctype html><meta charset="utf-8"><title>投稿助手</title><h1>${escapeHtml(title)}</h1><p>${escapeHtml(summary)}</p><p>打开一个平台，粘贴已复制的正文，检查后手动发布。</p><textarea id="article" style="width:95%;height:55vh">${escapeHtml(article)}</textarea><p>${PLATFORMS.map(([name, url]) => `<button onclick="navigator.clipboard.writeText(document.getElementById('article').value);window.open('${url}','_blank')">复制并打开${name}</button>`).join(" ")}</p>`; }
 function checklist(title, summary) { return `# 发布清单：${title}\n\n## 摘要\n\n${summary}\n\n## 最后检查\n\n- [ ] 平台标题长度和敏感词\n- [ ] 封面、图片、代码块、公式\n- [ ] 外链、引用和原创声明\n- [ ] 内容已核对，确认后再点击发布\n\n> 本插件不登录账号、不保存密钥，也不会自动点击发布。\n`; }
+
+module.exports._test = { cleanMarkdown, resolveObsidianImages, markdownToRichHtml, plainText, applyPortableStyles };

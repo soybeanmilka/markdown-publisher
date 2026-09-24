@@ -1,7 +1,7 @@
 {
   "id": "multi-platform-publisher",
   "name": "多平台投稿助手",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "minAppVersion": "1.5.0",
   "description": "从当前笔记生成公众号、小红书、知乎和 B 站的本地投稿稿件。",
   "author": "Local",

@@ -46,6 +46,8 @@ function main() {
 
   assert.ok(PLATFORM_CONFIG["mp.weixin.qq.com"].entryActions.some(action => action.text.includes("文章")));
   assert.ok(PLATFORM_CONFIG["mp.weixin.qq.com"].body.some(selector => selector.includes("contenteditable")));
+  assert.strictEqual(PLATFORM_CONFIG["mp.toutiao.com"].contentKind, "html");
+  assert.ok(PLATFORM_CONFIG["mp.toutiao.com"].url.includes("graphic/publish"));
   assert.ok(!Object.values(PLATFORM_CONFIG).some(adapter => /csdn/i.test(adapter.name || "")));
   assert.ok(PLATFORM_CONFIG["creator.xiaohongshu.com"].entryActions.some(action => action.text.includes("新的创作")));
   assert.ok(PLATFORM_CONFIG["member.bilibili.com"].entryActions.some(action => action.text.includes("新的创作")));

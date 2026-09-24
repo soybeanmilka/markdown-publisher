@@ -8,8 +8,8 @@
       name: "微信公众号",
       url: "https://mp.weixin.qq.com/",
       contentKind: "html",
-      title: ["#title", "textarea[placeholder*='标题']", "input[placeholder*='标题']"],
-      body: [".ProseMirror", ".edui-body-container", "body[contenteditable='true']", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
+      title: ["#title", "textarea[placeholder*='标题']", "input[placeholder*='标题']", "[contenteditable='true'][data-placeholder*='标题']", "[contenteditable='true'][aria-label*='标题']", ".appmsg_title [contenteditable='true']", "[class*='title'] [contenteditable='true']"],
+      body: [".ProseMirror", ".edui-body-container", ".js_editor_area [contenteditable='true']", "body[contenteditable='true']", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
       entryActions: [{ text: "文章" }]
     },
     "creator.xiaohongshu.com": {
@@ -26,6 +26,14 @@
       contentKind: "html",
       title: ["textarea[placeholder*='标题']", ".WriteIndex-titleInput textarea", "input[placeholder*='标题']"],
       body: [".public-DraftEditor-content", ".ProseMirror", "[contenteditable='true']"],
+      entryActions: []
+    },
+    "mp.toutiao.com": {
+      name: "今日头条",
+      url: "https://mp.toutiao.com/profile_v4/graphic/publish",
+      contentKind: "html",
+      title: ["textarea[placeholder*='标题']", "input[placeholder*='标题']", "[contenteditable='true'][data-placeholder*='标题']"],
+      body: [".ProseMirror", ".ql-editor", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
       entryActions: []
     },
     "member.bilibili.com": {
