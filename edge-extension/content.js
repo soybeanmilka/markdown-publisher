@@ -1,4 +1,38 @@
-const { PLATFORM_CONFIG, payloadContentFor } = globalThis.LocalPublisherPlatforms;
+const FALLBACK_PLATFORM_CONFIG = {
+  "mp.weixin.qq.com": {
+    name: "微信公众号", contentKind: "html",
+    title: ["#title", "textarea[placeholder*='标题']", "input[placeholder*='标题']"],
+    body: [".ProseMirror", ".edui-body-container", "body[contenteditable='true']", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
+    entryActions: [{ text: "文章" }]
+  },
+  "creator.xiaohongshu.com": {
+    name: "小红书", contentKind: "html",
+    title: ["input[placeholder*='标题']", "textarea[placeholder*='标题']"],
+    body: [".ProseMirror", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
+    entryActions: [{ text: "新的创作" }, { text: "新建创作" }, { text: "新建长文" }]
+  },
+  "zhuanlan.zhihu.com": {
+    name: "知乎", contentKind: "html",
+    title: ["textarea[placeholder*='标题']", ".WriteIndex-titleInput textarea", "input[placeholder*='标题']"],
+    body: [".public-DraftEditor-content", ".ProseMirror", "[contenteditable='true']"],
+    entryActions: []
+  },
+  "member.bilibili.com": {
+    name: "B站专栏", contentKind: "html",
+    title: ["input[placeholder*='标题']", "textarea[placeholder*='标题']"],
+    body: [".ProseMirror", ".ql-editor", "[contenteditable='true'][data-placeholder*='正文']", "[contenteditable='true']"],
+    entryActions: [{ text: "新的创作" }, { text: "新建专栏" }]
+  }
+};
+
+const platformApi = globalThis.LocalPublisherPlatforms || {
+  PLATFORM_CONFIG: FALLBACK_PLATFORM_CONFIG,
+  payloadContentFor(adapter, payload) {
+    if (payload?.bodyHtml) return { kind: "html", value: String(payload.bodyHtml) };
+    return { kind: "text", value: String(payload?.body || "") };
+  }
+};
+const { PLATFORM_CONFIG, payloadContentFor } = platformApi;
 
 function isVisible(element) {
   if (!element) return false;
