@@ -1,0 +1,8 @@
+{
+  "name": "local-multi-platform-publisher",
+  "version": "0.5.0",
+  "private": true,
+  "scripts": {
+    "test": "node tests/plugin-entry-load.test.js && node tests/content-bootstrap.test.js && node tests/platform-adapters.test.js && node tests/markdown-images.test.js && node tests/wechat-draft.test.js && node tests/bridge-smoke-test.js"
+  }
+}

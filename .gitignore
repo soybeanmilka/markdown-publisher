@@ -1,3 +1,5 @@
 __pycache__/
 output/
+dist/
 .env
+obsidian-plugin/data.json
